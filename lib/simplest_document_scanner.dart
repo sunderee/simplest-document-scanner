@@ -14,7 +14,10 @@ class SimplestDocumentScanner extends PlatformInterface {
   SimplestDocumentScanner({required super.token})
     : _channel = const MethodChannel(_channelName);
 
-  Future<Uint8List?> scanDocuments() async {
-    return _channel.invokeMethod<Uint8List>(_methodScanDocuments);
+  Future<List<Uint8List>?> scanDocuments() async {
+    final images = await _channel.invokeListMethod<Uint8List>(
+      _methodScanDocuments,
+    );
+    return images?.whereType<Uint8List>().toList();
   }
 }

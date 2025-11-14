@@ -32,12 +32,46 @@ public class SimplestDocumentScannerPlugin: NSObject, FlutterPlugin {
 private class VisionKitDocumentScanner: NSObject,
     VNDocumentCameraViewControllerDelegate
 {
+    private enum ScanError: String {
+        case unsupported = "DOCUMENT_SCANNER_UNSUPPORTED"
+        case presentationFailed = "SCANNER_PRESENTATION_FAILED"
+        case conversionFailed = "IMAGE_CONVERSION_FAILED"
+        case noImagesCaptured = "NO_IMAGES_CAPTURED"
+
+        var message: String {
+            switch self {
+            case .unsupported:
+                return "Document scanning is unsupported on this device."
+            case .presentationFailed:
+                return "Unable to present the document scanner UI."
+            case .conversionFailed:
+                return "Captured image could not be converted to JPEG."
+            case .noImagesCaptured:
+                return "No document images were captured."
+            }
+        }
+    }
+
+    private static let compressionQuality: CGFloat = 0.9
+
     @objc static func scanDocuments(result: @escaping FlutterResult) {
+        guard VNDocumentCameraViewController.isSupported else {
+            result(
+                FlutterError(
+                    code: ScanError.unsupported.rawValue,
+                    message: ScanError.unsupported.message,
+                    details: nil
+                )
+            )
+            return
+        }
+
         let instance = VisionKitDocumentScanner(result: result)
         instance.present()
     }
 
-    private var result: FlutterResult
+    private let result: FlutterResult
+    private var didComplete = false
 
     init(result: @escaping FlutterResult) {
         self.result = result
@@ -48,47 +82,86 @@ private class VisionKitDocumentScanner: NSObject,
         let controller = VNDocumentCameraViewController()
         controller.delegate = self
 
-        if let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive }),
-            let window = windowScene.windows.first(where: { $0.isKeyWindow }),
-            let rootVC = window.rootViewController
-        {
-            rootVC.present(controller, animated: true)
-        } else {
-            if let anyRootVC = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .flatMap({ $0.windows })
-                .first?.rootViewController
-            {
-                anyRootVC.present(controller, animated: true)
-            }
+        guard let presenter = findPresenter() else {
+            fail(with: .presentationFailed)
+            return
         }
+
+        presenter.present(controller, animated: true)
+    }
+
+    private func findPresenter() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+
+        if let activeScene = scenes.first(where: {
+            $0.activationState == .foregroundActive
+        }),
+            let window = activeScene.windows.first(where: { $0.isKeyWindow })
+        {
+            return window.rootViewController
+        }
+
+        return
+            scenes
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow })?
+            .rootViewController
+    }
+
+    private func complete(with value: Any?) {
+        guard !didComplete else { return }
+        didComplete = true
+        result(value)
+    }
+
+    private func fail(with error: ScanError) {
+        complete(
+            with: FlutterError(
+                code: error.rawValue,
+                message: error.message,
+                details: nil
+            )
+        )
     }
 
     func documentCameraViewController(
         _ controller: VNDocumentCameraViewController,
         didFinishWith scan: VNDocumentCameraScan
     ) {
-        let image = scan.imageOfPage(at: 0)
-        if let jpeg = image.jpegData(compressionQuality: 0.9) {
-            result(FlutterStandardTypedData(bytes: jpeg))
-        } else {
-            result(
-                FlutterError(
-                    code: "NO_IMAGE",
-                    message: "Failed to convert",
-                    details: nil
-                )
-            )
+        defer {
+            controller.dismiss(animated: true)
         }
-        controller.dismiss(animated: true)
+
+        guard scan.pageCount > 0 else {
+            fail(with: .noImagesCaptured)
+            return
+        }
+
+        var images = [FlutterStandardTypedData]()
+        for pageIndex in 0..<scan.pageCount {
+            let image = scan.imageOfPage(at: pageIndex)
+            guard
+                let jpeg = image.jpegData(
+                    compressionQuality: Self.compressionQuality
+                )
+            else {
+                fail(with: .conversionFailed)
+                return
+            }
+            images.append(FlutterStandardTypedData(bytes: jpeg))
+        }
+
+        complete(with: images)
     }
 
     func documentCameraViewControllerDidCancel(
         _ controller: VNDocumentCameraViewController
     ) {
-        result(nil)
-        controller.dismiss(animated: true)
+        defer {
+            controller.dismiss(animated: true)
+        }
+
+        complete(with: nil)
     }
 }
