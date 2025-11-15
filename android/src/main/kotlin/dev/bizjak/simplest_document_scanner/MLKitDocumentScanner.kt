@@ -12,58 +12,77 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER_MODE_FULL
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
-import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.Result
+import java.io.IOException
 
-internal object MLKitDocumentScanner {
+internal class MLKitDocumentScanner {
     fun scanDocuments(
-        context: ComponentActivity,
-        methodChannelResult: MethodChannel.Result,
-        galleryImportAllowed: Boolean = true,
-        scannerMode: Int = SCANNER_MODE_FULL,
+        activity: ComponentActivity,
+        result: Result,
+        galleryImportAllowed: Boolean,
+        scannerMode: Int,
+        maxNumberOfPages: Int?,
     ) {
         val parsedScannerMode = when (scannerMode) {
-            0 -> SCANNER_MODE_FULL
-            1 -> SCANNER_MODE_BASE_WITH_FILTER
-            2 -> SCANNER_MODE_BASE
-            else -> throw IllegalArgumentException("Invalid scanner mode")
+            1 -> SCANNER_MODE_FULL
+            2 -> SCANNER_MODE_BASE_WITH_FILTER
+            3 -> SCANNER_MODE_BASE
+            else -> throw IllegalArgumentException("Invalid scanner mode: $scannerMode")
         }
 
-        val options = GmsDocumentScannerOptions.Builder()
+        val optionsBuilder = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(galleryImportAllowed)
             .setScannerMode(parsedScannerMode)
             .setResultFormats(RESULT_FORMAT_JPEG)
-            .build()
 
+        if (maxNumberOfPages != null) {
+            if (maxNumberOfPages > 0) {
+                optionsBuilder.setPageLimit(maxNumberOfPages)
+            } else {
+                throw IllegalArgumentException("maxNumberOfPages must be a positive integer")
+            }
+        }
+
+        val options = optionsBuilder.build()
         val scanner = GmsDocumentScanning.getClient(options)
         val scannerLauncher =
-            context.registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-                if (result.resultCode == RESULT_OK) {
-                    val result = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
-
-                    result?.pages?.let { pages ->
-                        val pagesBytes = mutableListOf<ByteArray>()
-                        for (page in pages) {
-                            pagesBytes.add(page.imageUri.toFile().readBytes())
-                        }
-
-                        methodChannelResult.success(pagesBytes)
+            activity.registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { activityResult ->
+                if (activityResult.resultCode == RESULT_OK) {
+                    val intent = activityResult.data
+                    if (intent != null) {
+                        GmsDocumentScanningResult.fromActivityResultIntent(intent)
+                            ?.pages
+                            ?.let { pages ->
+                                try {
+                                    pages
+                                        .map { it.imageUri.toFile().readBytes() }
+                                        .also { result.success(it) }
+                                } catch (e: IOException) {
+                                    result.error(
+                                        "FILE_READ_ERROR",
+                                        "Failed to read scanned image file",
+                                        e.toString()
+                                    )
+                                }
+                            }
+                    } else {
+                        result.error("NO_DATA", "No data returned from scanner", null)
                     }
+                } else {
+                    result.error(
+                        "SCAN_FAILED",
+                        "Document scanning failed with result code: ${activityResult.resultCode}",
+                        null
+                    )
                 }
             }
-        scanner.getStartScanIntent(context)
-            .addOnSuccessListener { intentSender ->
-                scannerLauncher.launch(
-                    IntentSenderRequest.Builder(
-                        intentSender
-                    ).build()
-                )
+
+        scanner.getStartScanIntent(activity)
+            .addOnSuccessListener {
+                scannerLauncher.launch(IntentSenderRequest.Builder(it).build())
             }
-            .addOnFailureListener { exception ->
-                methodChannelResult.error(
-                    "UNABLE_TO_START_SCAN",
-                    exception.message,
-                    null
-                )
+            .addOnFailureListener {
+                result.error("SCANNER_ERROR", "Failed to start document scanner", it.toString())
             }
     }
 }

@@ -13,11 +13,14 @@ class SimplestDocumentScannerPlugin : FlutterPlugin, MethodCallHandler, Activity
     companion object {
         private const val METHOD_CHANNEL_NAME = "simplest_document_scanner"
         private const val METHOD_SCAN_DOCUMENTS = "scanDocuments"
+        private const val ARGUMENT_GALLERY_IMPORT_ALLOWED = "galleryImportAllowed"
+        private const val ARGUMENT_SCANNER_MODE = "scannerMode"
+        private const val ARGUMENT_MAX_NUMBER_OF_PAGES = "maxNumberOfPages"
     }
 
     private lateinit var channel: MethodChannel
-
     private var activity: ComponentActivity? = null
+    private val mlKitDocumentScanner = MLKitDocumentScanner()
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, METHOD_CHANNEL_NAME)
@@ -25,15 +28,26 @@ class SimplestDocumentScannerPlugin : FlutterPlugin, MethodCallHandler, Activity
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
-        when {
-            call.method == METHOD_SCAN_DOCUMENTS -> activity?.let {
-                MLKitDocumentScanner.scanDocuments(
-                    it,
-                    result
-                )
+        if (call.method == METHOD_SCAN_DOCUMENTS) {
+            val activity = this.activity
+            if (activity == null) {
+                result.error("NO_ACTIVITY", "No activity is attached to the plugin", null)
+                return
             }
 
-            else -> result.notImplemented()
+            try {
+                mlKitDocumentScanner.scanDocuments(
+                    activity,
+                    result,
+                    call.argument<Boolean>(ARGUMENT_GALLERY_IMPORT_ALLOWED) ?: true,
+                    call.argument<Int>(ARGUMENT_SCANNER_MODE) ?: 1,
+                    call.argument<Int>(ARGUMENT_MAX_NUMBER_OF_PAGES),
+                )
+            } catch (e: IllegalArgumentException) {
+                result.error("INVALID_ARGUMENT", e.message, null)
+            }
+        } else {
+            result.notImplemented()
         }
     }
 
