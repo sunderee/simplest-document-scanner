@@ -15,7 +15,7 @@ final class ExampleApplication extends StatefulWidget {
 }
 
 final class _ExampleApplicationState extends State<ExampleApplication> {
-  Uint8List? _image;
+  final List<Uint8List> _images = [];
 
   @override
   Widget build(BuildContext context) {
@@ -32,15 +32,23 @@ final class _ExampleApplicationState extends State<ExampleApplication> {
             ),
           ],
         ),
-        body: _image != null ? Image.memory(_image!) : const SizedBox.shrink(),
+        body: _images.isEmpty
+            ? const SizedBox.shrink()
+            : ListView.builder(
+                itemCount: _images.length,
+                itemBuilder: (context, index) => Image.memory(_images[index]),
+              ),
       ),
     );
   }
 
   Future<void> _beginDocumentScanning() async {
-    final image = await SimplestDocumentScanner.instance.scanDocuments();
-    if (image != null) {
-      setState(() => _image = image);
+    final images = await SimplestDocumentScanner.instance.scanDocuments();
+    if (images != null) {
+      setState(() {
+        _images.clear();
+        _images.addAll(images);
+      });
     }
   }
 }
