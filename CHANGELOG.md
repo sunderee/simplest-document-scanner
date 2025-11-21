@@ -1,3 +1,7 @@
+## 1.0.1
+
+- iOS: annotate `VNDocumentCameraViewControllerDelegate` methods with `@MainActor` to satisfy Swift 6 strict concurrency checking and fix the `ConformanceIsolation` build error.
+
 ## 1.0.0
 
 - Breaking: replace the legacy JPEG-only API with `DocumentScannerOptions`, `ScannedDocument`, and `DocumentScanException`.
