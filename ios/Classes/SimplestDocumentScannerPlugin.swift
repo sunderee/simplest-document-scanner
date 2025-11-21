@@ -307,7 +307,7 @@ enum DocumentScannerRequestError: Error {
   }
 }
 
-private enum ScanError: String {
+private enum ScanError: String, Error {
   case unsupported = "DOCUMENT_SCANNER_UNSUPPORTED"
   case presentationFailed = "SCANNER_PRESENTATION_FAILED"
   case conversionFailed = "IMAGE_CONVERSION_FAILED"
