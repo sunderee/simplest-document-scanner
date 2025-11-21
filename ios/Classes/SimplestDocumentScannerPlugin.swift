@@ -121,6 +121,7 @@ private final class VisionKitDocumentScanner: NSObject, VNDocumentCameraViewCont
     return root
   }
 
+  @MainActor
   func documentCameraViewController(
     _ controller: VNDocumentCameraViewController,
     didFinishWith scan: VNDocumentCameraScan
@@ -134,6 +135,7 @@ private final class VisionKitDocumentScanner: NSObject, VNDocumentCameraViewCont
     processScan(scan, with: request)
   }
 
+  @MainActor
   func documentCameraViewControllerDidCancel(
     _ controller: VNDocumentCameraViewController
   ) {
@@ -141,6 +143,7 @@ private final class VisionKitDocumentScanner: NSObject, VNDocumentCameraViewCont
     complete(with: nil)
   }
 
+  @MainActor
   func documentCameraViewController(
     _ controller: VNDocumentCameraViewController,
     didFailWithError error: Error

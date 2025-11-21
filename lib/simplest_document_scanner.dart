@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
@@ -293,9 +291,7 @@ class MethodChannelSimplestDocumentScanner
 
       if (response is Map<dynamic, dynamic>) {
         final typedMap = Map<String, dynamic>.from(
-          response.map(
-            (key, value) => MapEntry(key as String, value),
-          ),
+          response.map((key, value) => MapEntry(key as String, value)),
         );
         return ScannedDocument.fromPlatformResponse(typedMap);
       }

@@ -13,15 +13,15 @@ An opinionated Flutter plugin that exposes the latest ML Kit Document Scanner (A
 ## Platform Requirements
 
 - **Android**: API 31+ with Google Play Services (ML Kit document scanner)
-- **iOS**: VisionKit-capable devices (iOS 16+ recommended)
-- **Flutter**: >= 3.38.1
-- **Dart**: >= 3.10.0
+- **iOS**: VisionKit-capable devices (iOS 26+ required, Swift 6 strict concurrency ready)
+- **Flutter**: >=3.38.2
+- **Dart**: >=3.10.0
 
 ## Installation
 
 ```yaml
 dependencies:
-  simplest_document_scanner: ^1.0.0
+  simplest_document_scanner: ^1.0.1
 ```
 
 ```bash
