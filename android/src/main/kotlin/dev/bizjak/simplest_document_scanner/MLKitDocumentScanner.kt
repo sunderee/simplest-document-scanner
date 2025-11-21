@@ -2,8 +2,9 @@ package dev.bizjak.simplest_document_scanner
 
 import android.app.Activity.RESULT_OK
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.net.toFile
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
@@ -18,6 +19,7 @@ import java.io.IOException
 internal class MLKitDocumentScanner {
     fun scanDocuments(
         activity: ComponentActivity,
+        scannerLauncher: ActivityResultLauncher<IntentSenderRequest>,
         result: Result,
         galleryImportAllowed: Boolean,
         scannerMode: Int,
@@ -45,37 +47,6 @@ internal class MLKitDocumentScanner {
 
         val options = optionsBuilder.build()
         val scanner = GmsDocumentScanning.getClient(options)
-        val scannerLauncher =
-            activity.registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { activityResult ->
-                if (activityResult.resultCode == RESULT_OK) {
-                    val intent = activityResult.data
-                    if (intent != null) {
-                        GmsDocumentScanningResult.fromActivityResultIntent(intent)
-                            ?.pages
-                            ?.let { pages ->
-                                try {
-                                    pages
-                                        .map { it.imageUri.toFile().readBytes() }
-                                        .also { result.success(it) }
-                                } catch (e: IOException) {
-                                    result.error(
-                                        "FILE_READ_ERROR",
-                                        "Failed to read scanned image file",
-                                        e.toString()
-                                    )
-                                }
-                            }
-                    } else {
-                        result.error("NO_DATA", "No data returned from scanner", null)
-                    }
-                } else {
-                    result.error(
-                        "SCAN_FAILED",
-                        "Document scanning failed with result code: ${activityResult.resultCode}",
-                        null
-                    )
-                }
-            }
 
         scanner.getStartScanIntent(activity)
             .addOnSuccessListener {
@@ -84,5 +55,40 @@ internal class MLKitDocumentScanner {
             .addOnFailureListener {
                 result.error("SCANNER_ERROR", "Failed to start document scanner", it.toString())
             }
+    }
+
+    fun handleScanResult(
+        activityResult: ActivityResult,
+        result: Result,
+    ) {
+        if (activityResult.resultCode == RESULT_OK) {
+            val intent = activityResult.data
+            if (intent != null) {
+                GmsDocumentScanningResult.fromActivityResultIntent(intent)
+                    ?.pages
+                    ?.let { pages ->
+                        try {
+                            pages
+                                .map { it.imageUri.toFile().readBytes() }
+                                .also { result.success(it) }
+                        } catch (e: IOException) {
+                            result.error(
+                                "FILE_READ_ERROR",
+                                "Failed to read scanned image file",
+                                e.toString()
+                            )
+                        }
+                    }
+                    ?: result.error("NO_DATA", "No pages returned from scanner", null)
+            } else {
+                result.error("NO_DATA", "No data returned from scanner", null)
+            }
+        } else {
+            result.error(
+                "SCAN_FAILED",
+                "Document scanning failed with result code: ${activityResult.resultCode}",
+                null
+            )
+        }
     }
 }

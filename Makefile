@@ -1,4 +1,4 @@
-PHONY: help cleanup build-ios-no-codesign
+PHONY: help cleanup build-ios-no-codesign run-android run-ios
 
 .DEFAULT_GOAL := help
 BLUE := \033[34m
@@ -25,3 +25,9 @@ build-ios-no-codesign: ## Build the iOS app without code signing
 	@echo "Building iOS app without code signing..."
 	@cd example && flutter build ios --no-codesign --config-only
 	@echo "Build complete"
+
+run-android: ## Run the application on the first available Android device
+	@cd example && flutter run --device-id=$(shell flutter devices | awk -F'• ' '/android/ {print $$2}' | head -n1)
+
+run-ios: ## Run the application on the first available iOS device
+	@cd example &&flutter run --device-id=$(shell flutter devices | awk -F'• ' '/ios/ {print $$2}' | head -n1)
