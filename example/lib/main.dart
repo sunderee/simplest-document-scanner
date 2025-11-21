@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:simplest_document_scanner/simplest_document_scanner.dart';
 
@@ -15,7 +13,7 @@ final class ExampleApplication extends StatefulWidget {
 }
 
 final class _ExampleApplicationState extends State<ExampleApplication> {
-  final List<Uint8List> _images = [];
+  final List<ScannedPage> _pages = [];
   bool _isScanning = false;
   String? _errorMessage;
 
@@ -78,15 +76,15 @@ final class _ExampleApplicationState extends State<ExampleApplication> {
       );
     }
 
-    if (_images.isEmpty) {
+    if (_pages.isEmpty) {
       return const Center(child: Text('Tap the camera icon to scan documents'));
     }
 
     return ListView.builder(
-      itemCount: _images.length,
+      itemCount: _pages.length,
       itemBuilder: (context, index) => Padding(
         padding: const EdgeInsets.all(8.0),
-        child: Image.memory(_images[index]),
+        child: Image.memory(_pages[index].bytes),
       ),
     );
   }
@@ -98,12 +96,23 @@ final class _ExampleApplicationState extends State<ExampleApplication> {
     });
 
     try {
-      final images = await SimplestDocumentScanner.instance.scanDocuments();
-      if (images != null && images.isNotEmpty) {
+      final document = await SimplestDocumentScanner.scanDocuments(
+        options: const DocumentScannerOptions(
+          returnJpegs: true,
+          returnPdf: false,
+        ),
+      );
+      if (document != null && document.pages.isNotEmpty) {
         setState(() {
-          _images.clear();
-          _images.addAll(images);
+          _pages
+            ..clear()
+            ..addAll(document.pages);
           _isScanning = false;
+        });
+      } else if (document == null) {
+        setState(() {
+          _isScanning = false;
+          _errorMessage = 'Document scanning was cancelled.';
         });
       } else {
         setState(() {

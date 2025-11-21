@@ -3,12 +3,12 @@ import UIKit
 import VisionKit
 
 public class SimplestDocumentScannerPlugin: NSObject, FlutterPlugin {
-  private static let METHOD_CHANNEL_NAME: String = "simplest_document_scanner"
-  private static let METHOD_SCAN_DOCUMENTS: String = "scanDocuments"
+  private static let methodChannelName = "simplest_document_scanner"
+  private static let scanMethod = "scanDocuments"
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(
-      name: Self.METHOD_CHANNEL_NAME,
+      name: methodChannelName,
       binaryMessenger: registrar.messenger()
     )
     let instance = SimplestDocumentScannerPlugin()
@@ -20,99 +20,70 @@ public class SimplestDocumentScannerPlugin: NSObject, FlutterPlugin {
     result: @escaping FlutterResult
   ) {
     switch call.method {
-    case Self.METHOD_SCAN_DOCUMENTS:
-      VisionKitDocumentScanner.scanDocuments(result: result)
+    case Self.scanMethod:
+      do {
+        let request = try DocumentScannerRequest(arguments: call.arguments)
+        Task { @MainActor in
+          VisionKitDocumentScanner.shared.scan(
+            request: request,
+            flutterResult: result
+          )
+        }
+      } catch let error as DocumentScannerRequestError {
+        result(error.flutterError)
+      } catch {
+        result(
+          FlutterError(
+            code: "INVALID_ARGUMENT",
+            message: "Unable to parse scanner request.",
+            details: error.localizedDescription
+          )
+        )
+      }
     default:
       result(FlutterMethodNotImplemented)
     }
   }
 }
 
-@objc
-private class VisionKitDocumentScanner: NSObject,
-  VNDocumentCameraViewControllerDelegate
-{
-  private enum ScanError: String {
-    case unsupported = "DOCUMENT_SCANNER_UNSUPPORTED"
-    case presentationFailed = "SCANNER_PRESENTATION_FAILED"
-    case conversionFailed = "IMAGE_CONVERSION_FAILED"
-    case noImagesCaptured = "NO_IMAGES_CAPTURED"
+@MainActor
+private final class VisionKitDocumentScanner: NSObject, VNDocumentCameraViewControllerDelegate {
+  static let shared = VisionKitDocumentScanner()
 
-    var message: String {
-      switch self {
-      case .unsupported:
-        return "Document scanning is unsupported on this device."
-      case .presentationFailed:
-        return "Unable to present the document scanner UI."
-      case .conversionFailed:
-        return "Captured image could not be converted to JPEG."
-      case .noImagesCaptured:
-        return "No document images were captured."
-      }
-    }
-  }
-
-  private static let compressionQuality: CGFloat = 0.9
-  private static var activeScanner: VisionKitDocumentScanner?
-
-  @objc static func scanDocuments(result: @escaping FlutterResult) {
-    guard VNDocumentCameraViewController.isSupported else {
-      result(
-        FlutterError(
-          code: ScanError.unsupported.rawValue,
-          message: ScanError.unsupported.message,
-          details: nil
-        )
-      )
-      return
-    }
-
-    guard activeScanner == nil else {
-      result(
-        FlutterError(
-          code: ScanError.presentationFailed.rawValue,
-          message: "Another scan is already in progress.",
-          details: nil
-        )
-      )
-      return
-    }
-
-    let instance = VisionKitDocumentScanner(result: result)
-    activeScanner = instance
-    instance.present()
-  }
-
-  private let result: FlutterResult
-  private var didComplete = false
+  private var completion: FlutterResult?
+  private var request: DocumentScannerRequest?
   private weak var presentedController: VNDocumentCameraViewController?
 
-  init(result: @escaping FlutterResult) {
-    self.result = result
-    super.init()
-  }
+  func scan(request: DocumentScannerRequest, flutterResult: @escaping FlutterResult) {
+    guard VNDocumentCameraViewController.isSupported else {
+      flutterResult(ScanError.unsupported.flutterError)
+      return
+    }
 
-  func present() {
+    guard completion == nil else {
+      flutterResult(
+        FlutterError(
+          code: "SCAN_IN_PROGRESS",
+          message: "Another scan is already running.",
+          details: nil
+        )
+      )
+      return
+    }
+
+    self.request = request
+    completion = flutterResult
+
     let controller = VNDocumentCameraViewController()
     controller.delegate = self
     presentedController = controller
 
-    DispatchQueue.main.async { [weak self] in
-      guard let self = self else { return }
-
-      guard let presenter = self.findTopmostViewController() else {
-        self.fail(with: .presentationFailed)
-        Self.activeScanner = nil
+    guard let presenter = findTopmostViewController() else {
+      fail(.presentationFailed)
         return
       }
 
-      presenter.present(controller, animated: true) { [weak self] in
-        if self?.didComplete == false && self?.presentedController == nil {
-          self?.fail(with: .presentationFailed)
-          Self.activeScanner = nil
-        }
-      }
-    }
+    presenter.present(controller, animated: true)
   }
 
   private func findTopmostViewController() -> UIViewController? {
@@ -150,67 +121,23 @@ private class VisionKitDocumentScanner: NSObject,
     return root
   }
 
-  private func complete(with value: Any?) {
-    guard !didComplete else { return }
-    didComplete = true
-
-    DispatchQueue.main.async { [weak self] in
-      self?.result(value)
-      Self.activeScanner = nil
-    }
-  }
-
-  private func fail(with error: ScanError) {
-    complete(
-      with: FlutterError(
-        code: error.rawValue,
-        message: error.message,
-        details: nil
-      )
-    )
-  }
-
   func documentCameraViewController(
     _ controller: VNDocumentCameraViewController,
     didFinishWith scan: VNDocumentCameraScan
   ) {
-    defer {
-      DispatchQueue.main.async {
-        controller.dismiss(animated: true)
-      }
-    }
-
-    guard scan.pageCount > 0 else {
-      fail(with: .noImagesCaptured)
+    defer { controller.dismiss(animated: true) }
+    guard let request else {
+      fail(.presentationFailed)
       return
     }
 
-    var images = [FlutterStandardTypedData]()
-    for pageIndex in 0..<scan.pageCount {
-      let image = scan.imageOfPage(at: pageIndex)
-      guard
-        let jpeg = image.jpegData(
-          compressionQuality: Self.compressionQuality
-        )
-      else {
-        fail(with: .conversionFailed)
-        return
-      }
-      images.append(FlutterStandardTypedData(bytes: jpeg))
-    }
-
-    complete(with: images)
+    processScan(scan, with: request)
   }
 
   func documentCameraViewControllerDidCancel(
     _ controller: VNDocumentCameraViewController
   ) {
-    defer {
-      DispatchQueue.main.async {
-        controller.dismiss(animated: true)
-      }
-    }
-
+    defer { controller.dismiss(animated: true) }
     complete(with: nil)
   }
 
@@ -218,12 +145,191 @@ private class VisionKitDocumentScanner: NSObject,
     _ controller: VNDocumentCameraViewController,
     didFailWithError error: Error
   ) {
-    defer {
-      DispatchQueue.main.async {
-        controller.dismiss(animated: true)
+    defer { controller.dismiss(animated: true) }
+    fail(.presentationFailed)
+  }
+
+  private func processScan(
+    _ scan: VNDocumentCameraScan,
+    with request: DocumentScannerRequest
+  ) {
+    var images: [UIImage] = []
+    for index in 0..<scan.pageCount {
+      images.append(scan.imageOfPage(at: index))
+    }
+
+    if
+      request.enforceMaxPageLimit,
+      let maxPages = request.maxPages,
+      images.count > maxPages
+    {
+      images = Array(images.prefix(maxPages))
+    }
+
+    guard !images.isEmpty else {
+      fail(.noImagesCaptured)
+      return
+    }
+
+    var pagePayloads = [[String: Any]]()
+    if request.returnJpegs {
+      for (index, image) in images.enumerated() {
+        guard let jpegData = image.jpegData(compressionQuality: request.jpegQuality) else {
+          fail(.conversionFailed)
+          return
+        }
+
+        pagePayloads.append([
+          "index": index,
+          "bytes": FlutterStandardTypedData(bytes: jpegData),
+        ])
       }
     }
 
-    fail(with: .presentationFailed)
+    var response: [String: Any] = ["pages": pagePayloads]
+
+    if request.returnPdf {
+      do {
+        let pdfData = try makePdfData(from: images)
+        response["pdf"] = FlutterStandardTypedData(bytes: pdfData)
+      } catch {
+        fail(.pdfGenerationFailed)
+        return
+      }
+    }
+
+    complete(with: response)
+  }
+
+  private func makePdfData(from images: [UIImage]) throws -> Data {
+    guard let firstSize = images.first?.size else {
+      throw ScanError.noImagesCaptured
+    }
+
+    let renderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: firstSize))
+    return renderer.pdfData { context in
+      for image in images {
+        let bounds = CGRect(origin: .zero, size: image.size)
+        context.beginPage(withBounds: bounds, pageInfo: [:])
+        image.draw(in: bounds)
+      }
+    }
+  }
+
+  private func complete(with value: Any?) {
+    guard let completion else { return }
+    completion(value)
+    reset()
+  }
+
+  private func fail(_ error: ScanError) {
+    completion?(error.flutterError)
+    reset()
+  }
+
+  private func reset() {
+    completion = nil
+    request = nil
+    presentedController = nil
+  }
+}
+
+struct DocumentScannerRequest {
+  let maxPages: Int?
+  let returnJpegs: Bool
+  let returnPdf: Bool
+  let jpegQuality: CGFloat
+  let enforceMaxPageLimit: Bool
+
+  init(arguments: Any?) throws {
+    let dictionary = arguments as? [String: Any] ?? [:]
+
+    let returnJpegs = dictionary["returnJpegs"] as? Bool ?? true
+    let returnPdf = dictionary["returnPdf"] as? Bool ?? false
+    guard returnJpegs || returnPdf else {
+      throw DocumentScannerRequestError.noOutputFormats
+    }
+
+    let maxPages = dictionary["maxPages"] as? Int
+    if let maxPages, maxPages <= 0 {
+      throw DocumentScannerRequestError.invalidMaxPages
+    }
+
+    let jpegQualityValue = dictionary["jpegQuality"] as? Double ?? 0.9
+    guard jpegQualityValue >= 0, jpegQualityValue <= 1 else {
+      throw DocumentScannerRequestError.invalidJpegQuality
+    }
+
+    let iosArgs = dictionary["ios"] as? [String: Any]
+    let enforceLimit = iosArgs?["enforceMaxPageLimit"] as? Bool ?? true
+
+    self.maxPages = maxPages
+    self.returnJpegs = returnJpegs
+    self.returnPdf = returnPdf
+    self.jpegQuality = CGFloat(jpegQualityValue)
+    self.enforceMaxPageLimit = enforceLimit
+  }
+}
+
+enum DocumentScannerRequestError: Error {
+  case invalidArguments
+  case invalidMaxPages
+  case invalidJpegQuality
+  case noOutputFormats
+
+  var flutterError: FlutterError {
+    switch self {
+    case .invalidArguments:
+      return FlutterError(
+        code: "INVALID_ARGUMENT",
+        message: "Invalid scanner arguments provided.",
+        details: nil
+      )
+    case .invalidMaxPages:
+      return FlutterError(
+        code: "INVALID_ARGUMENT",
+        message: "maxPages must be a positive integer.",
+        details: nil
+      )
+    case .invalidJpegQuality:
+      return FlutterError(
+        code: "INVALID_ARGUMENT",
+        message: "jpegQuality must be between 0 and 1.",
+        details: nil
+      )
+    case .noOutputFormats:
+      return FlutterError(
+        code: "INVALID_ARGUMENT",
+        message: "At least one of returnJpegs or returnPdf must be true.",
+        details: nil
+      )
+    }
+  }
+}
+
+private enum ScanError: String {
+  case unsupported = "DOCUMENT_SCANNER_UNSUPPORTED"
+  case presentationFailed = "SCANNER_PRESENTATION_FAILED"
+  case conversionFailed = "IMAGE_CONVERSION_FAILED"
+  case noImagesCaptured = "NO_IMAGES_CAPTURED"
+  case pdfGenerationFailed = "PDF_GENERATION_FAILED"
+
+  var message: String {
+    switch self {
+    case .unsupported:
+      return "Document scanning is unsupported on this device."
+    case .presentationFailed:
+      return "Unable to present the document scanner UI."
+    case .conversionFailed:
+      return "Captured image could not be converted to JPEG."
+    case .noImagesCaptured:
+      return "No document images were captured."
+    case .pdfGenerationFailed:
+      return "Unable to generate a PDF from the captured images."
+    }
+  }
+
+  var flutterError: FlutterError {
+    FlutterError(code: rawValue, message: message, details: nil)
   }
 }

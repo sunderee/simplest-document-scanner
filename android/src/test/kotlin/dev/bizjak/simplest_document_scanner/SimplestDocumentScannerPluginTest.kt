@@ -1,8 +1,13 @@
 package dev.bizjak.simplest_document_scanner
 
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel.Result
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.kotlin.any
@@ -17,62 +22,77 @@ class SimplestDocumentScannerPluginTest {
 
     @Test
     fun `onMethodCall scanDocuments with no activity should return error`() {
-        // Arrange
         val plugin = SimplestDocumentScannerPlugin()
         val mockResult = mock<Result>()
 
-        // Act
         plugin.onMethodCall(MethodCall("scanDocuments", null), mockResult)
 
-        // Assert
         verify(mockResult).error("NO_ACTIVITY", "No activity is attached to the plugin", null)
     }
 
     @Test
     fun `onMethodCall scanDocuments with valid arguments should call scanner`() {
-        // Arrange
         val plugin = SimplestDocumentScannerPlugin()
         val mockScanner = mock<MLKitDocumentScanner>()
         val mockActivity = mock<ComponentActivity>()
-        plugin.activity = mockActivity
-        plugin.mlKitDocumentScanner = mockScanner
-
-        val arguments = mapOf(
-            "galleryImportAllowed" to false,
-            "scannerMode" to 1,
-            "maxNumberOfPages" to 5
-        )
-        val methodCall = MethodCall("scanDocuments", arguments)
+        val mockLauncher = mock<ActivityResultLauncher<IntentSenderRequest>>()
         val mockResult = mock<Result>()
 
-        // Act
+        plugin.configureForTesting(
+            activity = mockActivity,
+            launcher = mockLauncher,
+            documentScanner = mockScanner,
+        )
+
+        val arguments = mapOf(
+            "allowGalleryImport" to false,
+            "maxPages" to 5,
+            "returnJpegs" to true,
+            "returnPdf" to true,
+            "jpegQuality" to 0.8,
+            "android" to mapOf("scannerMode" to 2),
+        )
+        val methodCall = MethodCall("scanDocuments", arguments)
+
         plugin.onMethodCall(methodCall, mockResult)
 
-        // Assert
+        val requestCaptor = argumentCaptor<DocumentScannerRequest>()
         verify(mockScanner).scanDocuments(
-            eq(mockActivity),
-            eq(mockResult),
-            eq(false),
-            eq(1),
-            eq(5)
+            activity = eq(mockActivity),
+            scannerLauncher = eq(mockLauncher),
+            result = any(),
+            request = requestCaptor.capture(),
         )
+
+        val request = requestCaptor.firstValue
+        assertFalse(request.allowGalleryImport)
+        assertEquals(5, request.maxPages)
+        assertTrue(request.returnJpegs)
+        assertTrue(request.returnPdf)
+        assertEquals(ScannerModeOption.BASE_WITH_FILTER, request.scannerMode)
     }
 
     @Test
-    fun `onMethodCall scanDocuments with invalid maxNumberOfPages should return error`() {
-        // Arrange
+    fun `onMethodCall scanDocuments with invalid maxPages should return error`() {
         val plugin = SimplestDocumentScannerPlugin()
-        val mockActivity = mock<ComponentActivity>()
-        plugin.activity = mockActivity
-
-        val arguments = mapOf("maxNumberOfPages" to -1)
-        val methodCall = MethodCall("scanDocuments", arguments)
         val mockResult = mock<Result>()
+        val mockActivity = mock<ComponentActivity>()
+        val mockLauncher = mock<ActivityResultLauncher<IntentSenderRequest>>()
 
-        // Act
+        plugin.configureForTesting(
+            activity = mockActivity,
+            launcher = mockLauncher,
+        )
+
+        val arguments = mapOf("maxPages" to -1)
+        val methodCall = MethodCall("scanDocuments", arguments)
+
         plugin.onMethodCall(methodCall, mockResult)
 
-        // Assert
-        verify(mockResult).error("INVALID_ARGUMENT", "maxNumberOfPages must be a positive integer", null)
+        verify(mockResult).error(
+            eq("INVALID_ARGUMENT"),
+            eq("maxPages must be a positive integer."),
+            eq(null),
+        )
     }
 }

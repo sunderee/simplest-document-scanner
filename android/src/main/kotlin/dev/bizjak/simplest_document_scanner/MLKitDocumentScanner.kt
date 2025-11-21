@@ -1,16 +1,17 @@
 package dev.bizjak.simplest_document_scanner
 
+import android.app.Activity.RESULT_CANCELED
 import android.app.Activity.RESULT_OK
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
-import androidx.core.net.toFile
+import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.RESULT_FORMAT_JPEG
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER_MODE_BASE
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER_MODE_BASE_WITH_FILTER
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER_MODE_FULL
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.RESULT_FORMAT_PDF
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import io.flutter.plugin.common.MethodChannel.Result
@@ -21,74 +22,135 @@ internal class MLKitDocumentScanner {
         activity: ComponentActivity,
         scannerLauncher: ActivityResultLauncher<IntentSenderRequest>,
         result: Result,
-        galleryImportAllowed: Boolean,
-        scannerMode: Int,
-        maxNumberOfPages: Int?,
+        request: DocumentScannerRequest,
     ) {
-        val parsedScannerMode = when (scannerMode) {
-            1 -> SCANNER_MODE_FULL
-            2 -> SCANNER_MODE_BASE_WITH_FILTER
-            3 -> SCANNER_MODE_BASE
-            else -> throw IllegalArgumentException("Invalid scanner mode: $scannerMode")
-        }
-
         val optionsBuilder = GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(galleryImportAllowed)
-            .setScannerMode(parsedScannerMode)
-            .setResultFormats(RESULT_FORMAT_JPEG)
+            .setGalleryImportAllowed(request.allowGalleryImport)
+            .setScannerMode(request.scannerMode.mlKitValue)
 
-        if (maxNumberOfPages != null) {
-            if (maxNumberOfPages > 0) {
-                optionsBuilder.setPageLimit(maxNumberOfPages)
-            } else {
-                throw IllegalArgumentException("maxNumberOfPages must be a positive integer")
-            }
+        when {
+            request.returnJpegs && request.returnPdf -> optionsBuilder.setResultFormats(
+                RESULT_FORMAT_JPEG,
+                RESULT_FORMAT_PDF,
+            )
+            request.returnPdf -> optionsBuilder.setResultFormats(RESULT_FORMAT_PDF)
+            else -> optionsBuilder.setResultFormats(RESULT_FORMAT_JPEG)
         }
 
-        val options = optionsBuilder.build()
-        val scanner = GmsDocumentScanning.getClient(options)
+        request.maxPages?.let { optionsBuilder.setPageLimit(it) }
+
+        val scanner = GmsDocumentScanning.getClient(optionsBuilder.build())
 
         scanner.getStartScanIntent(activity)
             .addOnSuccessListener {
                 scannerLauncher.launch(IntentSenderRequest.Builder(it).build())
             }
-            .addOnFailureListener {
-                result.error("SCANNER_ERROR", "Failed to start document scanner", it.toString())
+            .addOnFailureListener { throwable ->
+                if (throwable is MlKitException && throwable.errorCode == MlKitException.UNSUPPORTED) {
+                    result.error(
+                        "DOCUMENT_SCANNER_UNSUPPORTED",
+                        "This device does not support the ML Kit document scanner.",
+                        throwable.localizedMessage,
+                    )
+                } else {
+                    result.error(
+                        "SCANNER_ERROR",
+                        "Failed to start document scanner.",
+                        throwable.localizedMessage,
+                    )
+                }
             }
     }
 
     fun handleScanResult(
+        activity: ComponentActivity,
         activityResult: ActivityResult,
+        request: DocumentScannerRequest,
         result: Result,
     ) {
-        if (activityResult.resultCode == RESULT_OK) {
-            val intent = activityResult.data
-            if (intent != null) {
-                GmsDocumentScanningResult.fromActivityResultIntent(intent)
-                    ?.pages
-                    ?.let { pages ->
-                        try {
-                            pages
-                                .map { it.imageUri.toFile().readBytes() }
-                                .also { result.success(it) }
-                        } catch (e: IOException) {
-                            result.error(
-                                "FILE_READ_ERROR",
-                                "Failed to read scanned image file",
-                                e.toString()
-                            )
-                        }
-                    }
-                    ?: result.error("NO_DATA", "No pages returned from scanner", null)
-            } else {
-                result.error("NO_DATA", "No data returned from scanner", null)
-            }
-        } else {
-            result.error(
+        when (activityResult.resultCode) {
+            RESULT_OK -> handleSuccess(activity, activityResult, request, result)
+            RESULT_CANCELED -> result.success(null)
+            else -> result.error(
                 "SCAN_FAILED",
                 "Document scanning failed with result code: ${activityResult.resultCode}",
-                null
+                null,
             )
         }
+    }
+
+    private fun handleSuccess(
+        activity: ComponentActivity,
+        activityResult: ActivityResult,
+        request: DocumentScannerRequest,
+        result: Result,
+    ) {
+        val intent = activityResult.data
+        if (intent == null) {
+            result.error("NO_DATA", "No data returned from scanner", null)
+            return
+        }
+
+        val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(intent)
+            ?: run {
+                result.error("NO_DATA", "No data returned from scanner", null)
+                return
+            }
+
+        val payload = mutableMapOf<String, Any>(
+            "pages" to emptyList<Map<String, Any>>(),
+        )
+
+        if (request.returnJpegs) {
+            val pages = scanResult.pages
+            if (pages.isNullOrEmpty()) {
+                result.error("NO_DATA", "No pages returned from scanner", null)
+                return
+            }
+
+            try {
+                val pagePayloads = pages.mapIndexed { index, page ->
+                    mapOf(
+                        "index" to index,
+                        "bytes" to readBytes(activity.contentResolver, page.imageUri),
+                    )
+                }
+                payload["pages"] = pagePayloads
+            } catch (error: IOException) {
+                result.error(
+                    "FILE_READ_ERROR",
+                    "Failed to read scanned image file.",
+                    error.localizedMessage,
+                )
+                return
+            }
+        }
+
+        if (request.returnPdf) {
+            val pdf = scanResult.pdf
+            if (pdf == null) {
+                result.error("NO_DATA", "No PDF returned from scanner", null)
+                return
+            }
+
+            try {
+                payload["pdf"] = readBytes(activity.contentResolver, pdf.uri)
+            } catch (error: IOException) {
+                result.error(
+                    "FILE_READ_ERROR",
+                    "Failed to read scanned PDF file.",
+                    error.localizedMessage,
+                )
+                return
+            }
+        }
+
+        result.success(payload)
+    }
+
+    private fun readBytes(contentResolver: ContentResolver, uri: Uri): ByteArray {
+        return contentResolver.openInputStream(uri)?.use { input ->
+            input.readBytes()
+        } ?: throw IOException("Unable to open document at $uri")
     }
 }
