@@ -1,6 +1,6 @@
 name: simplest_document_scanner
 description: "Simplest document scanning plugin powered by VisionKit on iOS and MLKit on Android"
-version: 0.0.1
+version: 1.0.0
 
 environment:
   sdk: ">=3.10.0"

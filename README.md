@@ -1,32 +1,28 @@
 # simplest_document_scanner
 
-A simple and straightforward document scanning plugin for Flutter, powered by VisionKit on iOS and MLKit on Android.
+An opinionated Flutter plugin that exposes the latest ML Kit Document Scanner (Android) and VisionKit document flow (iOS). The new 1.x API returns structured metadata, supports concurrent-safe invocations, and lets you request JPEG, PDF, or both outputs with platform-specific tuning.
 
 ## Features
 
-- Cross-platform document scanning (iOS and Android)
-- Native UI integration using platform-specific document scanners
-- Returns scanned images as `Uint8List` (JPEG format)
-- Configurable scanner options on Android (scanner mode, gallery import, page limits)
-- Simple and easy-to-use API
+- Cross-platform document capture with native scanners (VisionKit + ML Kit)
+- Configurable outputs: JPEG pages, consolidated PDF, or both
+- Page limits, gallery import toggles, and ML Kit scanner mode presets
+- Unified `DocumentScanException` surface with reason codes
+- Legacy helper (`legacyScanDocuments`) to ease migration from the v0 API
 
 ## Platform Requirements
 
-- **iOS**: iOS 13.0+ (VisionKit)
-- **Android**: Android API 31+ (MLKit Document Scanner)
-- **Flutter**: >=3.38.1
-- **Dart**: >=3.10.0
+- **Android**: API 31+ with Google Play Services (ML Kit document scanner)
+- **iOS**: VisionKit-capable devices (iOS 16+ recommended)
+- **Flutter**: >= 3.38.1
+- **Dart**: >= 3.10.0
 
 ## Installation
 
-Add `simplest_document_scanner` to your `pubspec.yaml`:
-
 ```yaml
 dependencies:
-  simplest_document_scanner: ^0.0.1
+  simplest_document_scanner: ^1.0.0
 ```
-
-Then run:
 
 ```bash
 flutter pub get
@@ -36,250 +32,150 @@ flutter pub get
 
 ### Android
 
-1. **Update `MainActivity.kt`**: Your `MainActivity` must extend `FlutterFragmentActivity`:
-
-```kotlin
-package dev.bizjak.example
-
-import io.flutter.embedding.android.FlutterFragmentActivity
-
-class MainActivity: FlutterFragmentActivity()
-```
-
-2. **Update `AndroidManifest.xml`**: Add the required MLKit metadata:
+1. Ensure `MainActivity` extends `FlutterFragmentActivity`.
+2. Add ML Kit metadata to `AndroidManifest.xml`:
 
 ```xml
-<application>
-    <!-- ... other configuration ... -->
-    
     <meta-data
         android:name="com.google.android.gms.version"
         android:value="@integer/google_play_services_version" />
-    
     <meta-data
         android:name="com.google.mlkit.vision.DEPENDENCIES"
         android:value="document_ui" />
-</application>
 ```
 
-3. **Permissions**: The plugin handles camera permissions automatically through the native scanner UI.
+3. Camera permissions are handled by the ML Kit UI, but you are responsible for declaring them in your manifest.
 
 ### iOS
 
-1. **Add Camera Usage Description**: Add the following to your `Info.plist`:
+1. Add a camera usage description to `Info.plist`:
 
 ```xml
 <key>NSCameraUsageDescription</key>
-<string>We need camera access to scan documents</string>
+<string>We need camera access to scan documents.</string>
 ```
 
-2. **No additional code changes required**: The plugin automatically integrates with your Flutter app.
+2. No other code changes are required; VisionKit UI is wired automatically. The Podspec targets Swift 6 and a VisionKit-capable iOS version.
 
 ## Usage
 
-### Basic Usage
+### Basic scan
 
 ```dart
 import 'package:simplest_document_scanner/simplest_document_scanner.dart';
 
-// Scan documents with default settings
-final images = await SimplestDocumentScanner.instance.scanDocuments();
+Future<void> scanDocuments() async {
+  try {
+    final document = await SimplestDocumentScanner.scanDocuments(
+      options: const DocumentScannerOptions(
+        maxPages: 8,
+        returnJpegs: true,
+        returnPdf: false,
+        android: AndroidScannerOptions(
+          scannerMode: DocumentScannerMode.full,
+        ),
+      ),
+    );
 
-if (images != null && images.isNotEmpty) {
-  // Process scanned images (List<Uint8List>)
-  for (final image in images) {
-    // Use the image bytes
-    Image.memory(image);
+    if (document == null) {
+      print('User cancelled the scan.');
+      return;
+    }
+
+    for (final page in document.pages) {
+      // Each page contains index + Uint8List bytes
+      processPage(page.bytes);
+    }
+
+    if (document.hasPdf) {
+      savePdf(document.pdfBytes!);
+    }
+  } on DocumentScanException catch (error) {
+    handleScanFailure(error.reason, error.message);
   }
 }
 ```
 
-### Android-Specific Options
+### Advanced configuration
 
 ```dart
-import 'package:simplest_document_scanner/simplest_document_scanner.dart';
-
-final images = await SimplestDocumentScanner.instance.scanDocuments(
-  androidOptions: AndroidOptions(
-    galleryImportAllowed: true,  // Allow importing from gallery
-    scannerMode: 1,               // Scanner mode (see below)
-    maxNumberOfPages: 10,         // Limit number of pages (optional)
+final options = DocumentScannerOptions(
+  maxPages: 4,
+  returnJpegs: true,
+  returnPdf: true,
+  allowGalleryImport: false,
+  android: const AndroidScannerOptions(
+    scannerMode: DocumentScannerMode.baseWithFilter,
+  ),
+  ios: const IosScannerOptions(
+    enforceMaxPageLimit: true,
   ),
 );
+
+final document = await SimplestDocumentScanner.scanDocuments(options: options);
 ```
 
-#### Scanner Modes (Android)
+### Legacy helper
 
-- `1` - **FULL**: Full-featured scanner with all MLKit features (default)
-- `2` - **BASE_WITH_FILTER**: Base scanner with filtering capabilities
-- `3` - **BASE**: Basic scanner mode
-
-### Complete Example
+Still need the v0 behavior? Use:
 
 ```dart
-import 'dart:typed_data';
-import 'package:flutter/material.dart';
-import 'package:simplest_document_scanner/simplest_document_scanner.dart';
-
-class DocumentScannerExample extends StatefulWidget {
-  const DocumentScannerExample({super.key});
-
-  @override
-  State<DocumentScannerExample> createState() => _DocumentScannerExampleState();
-}
-
-class _DocumentScannerExampleState extends State<DocumentScannerExample> {
-  final List<Uint8List> _scannedImages = [];
-  bool _isScanning = false;
-  String? _errorMessage;
-
-  Future<void> _scanDocuments() async {
-    setState(() {
-      _isScanning = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final images = await SimplestDocumentScanner.instance.scanDocuments(
-        androidOptions: AndroidOptions(
-          galleryImportAllowed: true,
-          scannerMode: 1,
-        ),
-      );
-
-      if (images != null && images.isNotEmpty) {
-        setState(() {
-          _scannedImages.clear();
-          _scannedImages.addAll(images);
-          _isScanning = false;
-        });
-      } else {
-        setState(() {
-          _isScanning = false;
-          _errorMessage = 'No images were scanned';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isScanning = false;
-        _errorMessage = 'Error scanning documents: $e';
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Document Scanner'),
-        actions: [
-          IconButton(
-            onPressed: _isScanning ? null : _scanDocuments,
-            icon: _isScanning
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.camera),
-          ),
-        ],
-      ),
-      body: _errorMessage != null
-          ? Center(child: Text(_errorMessage!))
-          : _scannedImages.isEmpty
-              ? const Center(child: Text('Tap the camera icon to scan documents'))
-              : ListView.builder(
-                  itemCount: _scannedImages.length,
-                  itemBuilder: (context, index) => Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Image.memory(_scannedImages[index]),
-                  ),
-                ),
-    );
-  }
-}
+final images = await SimplestDocumentScanner.legacyScanDocuments();
 ```
 
-## API Reference
+This forces JPEG-only output and returns `List<Uint8List>?`.
 
-### `SimplestDocumentScanner`
+## Public API overview
 
-#### `instance`
+### `DocumentScannerOptions`
 
-Singleton instance of the document scanner.
+| Property | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `maxPages` | `int?` | `null` | Positive limit, applied on both platforms |
+| `returnJpegs` | `bool` | `true` | Controls per-page JPEG payloads |
+| `returnPdf` | `bool` | `false` | Requests consolidated PDF output |
+| `jpegQuality` | `double` | `0.9` | Applied where platforms support re-encoding |
+| `allowGalleryImport` | `bool` | `true` | Android-only toggle |
+| `android` | `AndroidScannerOptions` | `DocumentScannerMode.full` | Maps to ML Kit scanner modes |
+| `ios` | `IosScannerOptions` | `enforceMaxPageLimit: true` | Allows post-scan trimming |
 
-```dart
-SimplestDocumentScanner.instance
-```
+### Results
 
-#### `scanDocuments`
+`ScannedDocument` contains:
 
-Scans documents using the native scanner UI.
+- `pages`: `List<ScannedPage>` (index + `Uint8List bytes`)
+- `pdfBytes`: optional `Uint8List`
+- Convenience getter `hasPdf`
 
-```dart
-Future<List<Uint8List>?> scanDocuments({
-  AndroidOptions? androidOptions,
-})
-```
+### Errors
 
-**Parameters:**
-- `androidOptions` (optional): Android-specific configuration options. Ignored on iOS.
+All failures throw `DocumentScanException`, which surfaces:
 
-**Returns:**
-- `Future<List<Uint8List>?>`: List of scanned images as JPEG bytes, or `null` if the user cancelled.
+- `reason`: `DocumentScanExceptionReason`
+- `message`, `code`, `details`
 
-**Throws:**
-- Platform exceptions if scanning fails (e.g., camera permission denied, scanner not supported).
+Reasons include `unsupported`, `inProgress`, `launcherError`, `ioError`, `platformError`, and `unknown`.
 
-### `AndroidOptions`
+## Error codes surfaced from native layers
 
-Android-specific configuration for document scanning.
+| Platform | Code | Meaning |
+| --- | --- | --- |
+| Both | `DOCUMENT_SCANNER_UNSUPPORTED` | Device does not meet ML Kit/VisionKit requirements |
+| Both | `SCAN_IN_PROGRESS` | Another scan is running |
+| Android | `NO_ACTIVITY`, `ACTIVITY_DETACHED` | Plugin lost its hosting Activity |
+| Android | `SCANNER_ERROR`, `NO_DATA`, `FILE_READ_ERROR` | ML Kit start/result issues |
+| Android | `SCAN_FAILED` | Activity returned non-success / non-cancel code |
+| iOS | `SCANNER_PRESENTATION_FAILED` | Unable to present VNDocumentCamera UI |
+| iOS | `IMAGE_CONVERSION_FAILED`, `PDF_GENERATION_FAILED`, `NO_IMAGES_CAPTURED` | VisionKit capture issues |
 
-```dart
-AndroidOptions({
-  bool galleryImportAllowed = false,
-  int scannerMode = 1,
-  int? maxNumberOfPages,
-})
-```
+## Testing
 
-**Parameters:**
-- `galleryImportAllowed`: Whether to allow importing images from the gallery (default: `false`)
-- `scannerMode`: Scanner mode (1 = FULL, 2 = BASE_WITH_FILTER, 3 = BASE) (default: `1`)
-- `maxNumberOfPages`: Maximum number of pages to scan (optional, no limit if not specified)
+- **Flutter/Dart**: `flutter test`
+- **Android (Robolectric)**: `./gradlew testDebugUnitTest`
+- **iOS XCTest**: `pod lib lint --tests` (the Podspec defines a `Tests` spec)
 
-## Error Handling
-
-The plugin may throw `PlatformException` with the following error codes:
-
-### Android
-
-- `NO_ACTIVITY`: No activity is attached to the plugin
-- `SCAN_IN_PROGRESS`: Another scan is already in progress
-- `INVALID_ARGUMENT`: Invalid argument provided (e.g., invalid scanner mode)
-- `SCANNER_ERROR`: Failed to start the document scanner
-- `FILE_READ_ERROR`: Failed to read scanned image file
-- `NO_DATA`: No data returned from scanner
-- `SCAN_FAILED`: Document scanning failed
-- `ACTIVITY_DETACHED`: Activity was detached during scan
-
-### iOS
-
-- `DOCUMENT_SCANNER_UNSUPPORTED`: Document scanning is unsupported on this device
-- `SCANNER_PRESENTATION_FAILED`: Unable to present the document scanner UI
-- `IMAGE_CONVERSION_FAILED`: Captured image could not be converted to JPEG
-- `NO_IMAGES_CAPTURED`: No document images were captured
-
-## Notes
-
-- Scanned images are returned as JPEG-encoded `Uint8List` bytes
-- On iOS, images are compressed at 90% quality
-- The plugin handles camera permissions automatically through the native scanner UI
-- Only one scan can be in progress at a time
-- On Android, the scanner requires `FlutterFragmentActivity` for proper lifecycle management
-- The plugin uses native platform scanners, so the UI and behavior may differ slightly between iOS and Android
+The repository ships with unit tests that cover Dart serialization, Android request parsing, and Swift request validation.
 
 ## License
 
-See the [LICENSE](LICENSE) file for details.
+See [LICENSE](LICENSE).
