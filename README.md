@@ -1,15 +1,16 @@
 # simplest_document_scanner
 
-Simplest document scanning plugin powered by VisionKit on iOS and MLKit on Android
+Simplest document scanning plugin powered by VisionKit on iOS and MLKit on Android.
 
-## Getting Started
+## Usage
 
-This project is a starting point for a Flutter
-[plug-in package](https://flutter.dev/to/develop-plugins),
-a specialized package that includes platform-specific implementation code for
-Android and/or iOS.
+Once the package is added, you'll need to perform the following changes:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+1. Your `MainActivity.kt` should extend `FlutterFragmentActivity`:
+```kt
+import io.flutter.embedding.android.FlutterFragmentActivity
 
+class MainActivity: FlutterFragmentActivity()
+```
+
+2. Make sure you have necessary 
