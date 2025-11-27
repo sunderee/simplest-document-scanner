@@ -1,3 +1,7 @@
+## 1.1.0
+
+- iOS: fix Swift 6 strict concurrency warnings for `FlutterResult` closure and `VNDocumentCameraViewControllerDelegate` conformance.
+
 ## 1.0.1
 
 - iOS: annotate `VNDocumentCameraViewControllerDelegate` methods with `@MainActor` to satisfy Swift 6 strict concurrency checking and fix the `ConformanceIsolation` build error.
