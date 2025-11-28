@@ -1,3 +1,7 @@
+## 1.1.1
+
+- Changed iOS deployment target from 26.0 to 15.0 in `Podfile`, `project.pbxproj`, and `simplest_document_scanner.podspec` for broader compatibility.
+
 ## 1.1.0
 
 - iOS: fix Swift 6 strict concurrency warnings for `FlutterResult` closure and `VNDocumentCameraViewControllerDelegate` conformance.
