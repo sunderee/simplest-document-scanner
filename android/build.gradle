@@ -18,7 +18,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://storage.googleapis.com/download.flutter.io' }
+        // maven { url 'https://storage.googleapis.com/download.flutter.io' }
     }
 }
 
@@ -49,7 +49,7 @@ android {
     }
 
     dependencies {
-        compileOnly("io.flutter:flutter_embedding_debug:1.0.0-b5990e5ccc5e325fd24f0746e7d6689bbebc7c65")
+        // compileOnly("io.flutter:flutter_embedding_debug:1.0.0-b5990e5ccc5e325fd24f0746e7d6689bbebc7c65")
         implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
         implementation("androidx.activity:activity-ktx:1.12.0")
         testImplementation("org.jetbrains.kotlin:kotlin-test")

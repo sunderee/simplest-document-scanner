@@ -1,3 +1,8 @@
+## 1.1.2
+
+- For release, on Android, remove the `compileOnly` dependency on `flutter_embedding_debug`, as well as the `maven { url 'https://storage.googleapis.com/download.flutter.io' }` repository.
+- Bump Flutter and Dart SDK versions to the latest stable versions.
+
 ## 1.1.1
 
 - Changed iOS deployment target from 26.0 to 15.0 in `Podfile`, `project.pbxproj`, and `simplest_document_scanner.podspec` for broader compatibility.
